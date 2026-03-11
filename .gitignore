@@ -1,0 +1,83 @@
+# ============================================================
+# ARCHIVOS SENSIBLES — nunca subir al repositorio
+# ============================================================
+
+# Credenciales de Google (cuenta de servicio)
+credentials.json
+credencial.json
+*.json
+# Excepción: si hay JSONs no sensibles, agrégalos con:
+# !nombre_archivo_seguro.json
+
+# Configuración con contraseñas (MySQL, rutas, etc.)
+config_agente.json
+
+# ============================================================
+# BASE DE DATOS LOCAL
+# ============================================================
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================================
+# LOGS
+# ============================================================
+*.log
+logs/
+
+# ============================================================
+# PYINSTALLER — archivos de compilación
+# ============================================================
+build/
+dist/
+*.spec.bak
+
+# ============================================================
+# PYTHON
+# ============================================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+*.egg
+
+# Entornos virtuales
+venv/
+env/
+.venv/
+.env/
+ENV/
+
+# Variables de entorno
+.env
+.env.*
+
+# ============================================================
+# SISTEMA OPERATIVO
+# ============================================================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ============================================================
+# EDITORES / IDEs
+# ============================================================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ============================================================
+# ARCHIVOS TEMPORALES
+# ============================================================
+*.tmp
+*.bak
+*.swp
+*.swo
+~$*
