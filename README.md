@@ -739,4 +739,8 @@ pyinstaller ZebraCloudSync.spec
 
 
 
+asi se compila
+pyinstaller ZebraCloudSync.spec --noconfirm
+
+
 

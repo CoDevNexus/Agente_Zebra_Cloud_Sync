@@ -58,14 +58,14 @@ GOOGLE_SCOPES = [
 ]
 
 
-_log_fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(threadName)s | %(message)s")
-_file_handler = logging.FileHandler(LOG_PATH, encoding="utf-8")
-_file_handler.setLevel(logging.WARNING)
-_file_handler.setFormatter(_log_fmt)
-_console_handler = logging.StreamHandler()
-_console_handler.setLevel(logging.INFO)
-_console_handler.setFormatter(_log_fmt)
-logging.basicConfig(level=logging.INFO, handlers=[_file_handler, _console_handler])
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(threadName)s | %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_PATH, encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
 logger = logging.getLogger(APP_NAME)
 
 if TYPE_CHECKING:
@@ -98,7 +98,6 @@ class ConfigManager:
         "configured_once": False,
         "scanner_mode": "hid",
         "hid_inter_char_ms": 150,
-        "grid_font_size": 0,
     }
 
     def __init__(self, path: Path):
@@ -619,7 +618,6 @@ class ScannerWorker(threading.Thread):
         self.reload_event = reload_event
         self.serial_conn: Optional[serial.Serial] = None
         self.current_port = ""
-        self._last_serial_error: str = ""
 
     def close_serial(self) -> None:
         try:
@@ -655,8 +653,6 @@ class ScannerWorker(threading.Thread):
             dsrdtr=False,             # sin control de flujo DSR/DTR (CDC)
         )
         self.current_port = desired_port
-        self._last_serial_error = ""
-        logger.warning("Escáner conectado en %s", desired_port)
         self.ui_queue.put(("status", f"Escáner conectado en {desired_port}"))
 
     @staticmethod
@@ -668,12 +664,12 @@ class ScannerWorker(threading.Thread):
         cfg = self.config_manager.get()
         try:
             descripcion, stock = self.mysql_service.fetch_product(cfg, codigo)
-        except MySQLError as exc:
+        except MySQLError:
             logger.exception("MySQL fuera de línea. Se guarda el código con Error DB")
-            descripcion, stock = f"Error DB: {exc}", 0.0
-        except Exception as exc:
+            descripcion, stock = "Error DB", 0.0
+        except Exception:
             logger.exception("Error consultando producto. Se guarda el código con Error DB")
-            descripcion, stock = f"Error DB: {exc}", 0.0
+            descripcion, stock = "Error DB", 0.0
 
         self.local_store.insert_scan(codigo, descripcion, stock)
         cancelled, _reason, cancelled_ids = self.local_store.maybe_cancel_scan_group(
@@ -719,18 +715,12 @@ class ScannerWorker(threading.Thread):
 
                 self._process_code(codigo)
             except serial.SerialException as exc:
-                err_key = f"serial:{exc}"
-                if err_key != self._last_serial_error:
-                    self._last_serial_error = err_key
-                    logger.warning("Escáner desconectado / error serial: %s", exc)
+                logger.exception("Error de puerto serial")
                 self.ui_queue.put(("status", f"Error serial: {exc}"))
                 self.close_serial()
                 time.sleep(2)
             except Exception as exc:
-                err_key = f"other:{exc}"
-                if err_key != self._last_serial_error:
-                    self._last_serial_error = err_key
-                    logger.exception("Error en ScannerWorker")
+                logger.exception("Error en ScannerWorker")
                 self.ui_queue.put(("status", f"Scanner: {exc}"))
                 time.sleep(1)
 
@@ -803,12 +793,12 @@ class HIDScannerWorker(threading.Thread):
         cfg = self.config_manager.get()
         try:
             descripcion, stock = self.mysql_service.fetch_product(cfg, codigo)
-        except MySQLError as exc:
+        except MySQLError:
             logger.exception("MySQL fuera de línea. Se guarda código con Error DB")
-            descripcion, stock = f"Error DB: {exc}", 0.0
-        except Exception as exc:
+            descripcion, stock = "Error DB", 0.0
+        except Exception:
             logger.exception("Error consultando producto en modo HID")
-            descripcion, stock = f"Error DB: {exc}", 0.0
+            descripcion, stock = "Error DB", 0.0
 
         self.local_store.insert_scan(codigo, descripcion, stock)
         cancelled, _reason, cancelled_ids = self.local_store.maybe_cancel_scan_group(
@@ -959,7 +949,6 @@ class ZebraCloudSyncApp(ctk.CTk):
         self.page_count = 1
         self.start_hidden = start_hidden
         self._tab_guard_active = False
-        self._config_authenticated = False
         self._port_map: Dict[str, str] = {}
 
         self.config_manager = ConfigManager(CONFIG_PATH)
@@ -1063,27 +1052,10 @@ class ZebraCloudSyncApp(ctk.CTk):
             row=0, column=4, padx=6, pady=12
         )
 
-        # ── Zoom grid buttons ──
-        zoom_frame = ctk.CTkFrame(topbar, fg_color="transparent")
-        zoom_frame.grid(row=0, column=5, padx=6, pady=12, sticky="e")
-        ctk.CTkLabel(zoom_frame, text="Texto:", anchor="e").pack(side="left", padx=(0, 4))
-        ctk.CTkButton(zoom_frame, text="A−", width=38, height=32, command=lambda: self._zoom_grid(-2)).pack(side="left", padx=2)
-        ctk.CTkButton(zoom_frame, text="A+", width=38, height=32, command=lambda: self._zoom_grid(2)).pack(side="left", padx=2)
-
         tree_frame = ctk.CTkFrame(tab)
         tree_frame.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
         tree_frame.grid_columnconfigure(0, weight=1)
         tree_frame.grid_rowconfigure(0, weight=1)
-
-        # ── DPI base + saved font size ──
-        try:
-            self._dpi_scale = self._get_widget_scaling()
-        except Exception:
-            self._dpi_scale = 1.0
-        saved_size = int(self.config_manager.get().get("grid_font_size", 0) or 0)
-        self._grid_font_size = saved_size if saved_size >= 10 else max(14, round(14 * self._dpi_scale))
-        self._tv_style = ttk.Style()
-        self._apply_tree_font_size()
 
         columns = ("id", "codigo", "descripcion", "stock", "fecha", "tiempo", "estado")
         self.history_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=20)
@@ -1095,13 +1067,13 @@ class ZebraCloudSyncApp(ctk.CTk):
         self.history_tree.heading("tiempo", text="Tiempo restante")
         self.history_tree.heading("estado", text="Estado")
 
-        self.history_tree.column("id", width=round(70 * self._dpi_scale), anchor="center")
-        self.history_tree.column("codigo", width=round(150 * self._dpi_scale), anchor="center")
-        self.history_tree.column("descripcion", width=round(300 * self._dpi_scale), anchor="w")
-        self.history_tree.column("stock", width=round(90 * self._dpi_scale), anchor="center")
-        self.history_tree.column("fecha", width=round(150 * self._dpi_scale), anchor="center")
-        self.history_tree.column("tiempo", width=round(120 * self._dpi_scale), anchor="center")
-        self.history_tree.column("estado", width=round(180 * self._dpi_scale), anchor="center")
+        self.history_tree.column("id", width=70, anchor="center")
+        self.history_tree.column("codigo", width=150, anchor="center")
+        self.history_tree.column("descripcion", width=300, anchor="w")
+        self.history_tree.column("stock", width=90, anchor="center")
+        self.history_tree.column("fecha", width=150, anchor="center")
+        self.history_tree.column("tiempo", width=120, anchor="center")
+        self.history_tree.column("estado", width=180, anchor="center")
 
         yscroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.history_tree.yview)
         self.history_tree.configure(yscrollcommand=yscroll.set)
@@ -1252,27 +1224,6 @@ class ZebraCloudSyncApp(ctk.CTk):
             row=0, column=5, padx=(4, 12), pady=6, sticky="ew"
         )
 
-        # ── Lock overlay (hides config until password is verified) ─────
-        self.config_lock_overlay = ctk.CTkFrame(tab, fg_color="#D6D6D6", corner_radius=0)
-        self.config_lock_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-
-        lock_center = ctk.CTkFrame(self.config_lock_overlay, fg_color="transparent")
-        lock_center.place(relx=0.5, rely=0.45, anchor="center")
-
-        ctk.CTkLabel(lock_center, text="\U0001F512", font=ctk.CTkFont(size=48)).pack(pady=(0, 10))
-        ctk.CTkLabel(
-            lock_center, text="Configuración protegida",
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(pady=(0, 6))
-        ctk.CTkLabel(
-            lock_center, text="Ingresa la contraseña para acceder",
-            font=ctk.CTkFont(size=13), text_color="gray",
-        ).pack(pady=(0, 18))
-        ctk.CTkButton(
-            lock_center, text="Desbloquear", width=180, height=40,
-            command=self._guard_config_access,
-        ).pack()
-
     def _label(self, parent, row: int, col: int, text: str) -> None:
         ctk.CTkLabel(parent, text=text, anchor="w").grid(row=row, column=col, sticky="w", padx=12, pady=4)
 
@@ -1283,16 +1234,7 @@ class ZebraCloudSyncApp(ctk.CTk):
 
     def _set_status(self, message: str) -> None:
         self.status_var.set(message)
-
-    def _apply_tree_font_size(self) -> None:
-        sz = self._grid_font_size
-        self._tv_style.configure("Treeview", font=("Segoe UI", -sz), rowheight=max(28, sz + 14))
-        self._tv_style.configure("Treeview.Heading", font=("Segoe UI", -sz, "bold"))
-
-    def _zoom_grid(self, delta: int) -> None:
-        self._grid_font_size = max(10, min(40, self._grid_font_size + delta))
-        self._apply_tree_font_size()
-        self.config_manager.update({"grid_font_size": self._grid_font_size})
+        logger.info(message)
 
     def _load_config_to_form(self) -> None:
         cfg = self.config_manager.get()
@@ -2025,54 +1967,26 @@ class ZebraCloudSyncApp(ctk.CTk):
         messagebox.showinfo("Contraseña", "Contraseña actualizada correctamente.")
 
     def request_open_config(self) -> None:
-        if self._config_authenticated:
-            self.tabview.set("Configuración")
-            return
-        self.ensure_config_password_exists()
-        if self.verify_config_password():
-            self._unlock_config_tab()
-            self._tab_guard_active = True
-            self.tabview.set("Configuración")
+        self.tabview.set("Configuración")
 
     def _on_tab_changed(self) -> None:
         if self._tab_guard_active:
             self._tab_guard_active = False
             return
-        current = self.tabview.get()
-        if current == "Configuración":
-            if not self._config_authenticated:
-                self._lock_config_tab()
-                self.after(50, self._guard_config_access)
-        else:
-            if self._config_authenticated:
-                self._lock_config_tab()
+        if self.tabview.get() == "Configuración":
+            self.after(10, self._guard_config_access)
 
     def _guard_config_access(self) -> None:
         if self.tabview.get() != "Configuración":
             return
-        if self._config_authenticated:
-            return
         if self.verify_config_password():
-            self._unlock_config_tab()
-        else:
-            self._tab_guard_active = True
-            self.tabview.set("Historial")
-
-    def _lock_config_tab(self) -> None:
-        self._config_authenticated = False
-        if hasattr(self, "config_lock_overlay"):
-            self.config_lock_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-            self.config_lock_overlay.lift()
-
-    def _unlock_config_tab(self) -> None:
-        self._config_authenticated = True
-        if hasattr(self, "config_lock_overlay"):
-            self.config_lock_overlay.place_forget()
+            return
+        self._tab_guard_active = True
+        self.tabview.set("Historial")
 
     def hide_to_tray(self) -> None:
         if self.exiting:
             return
-        self._lock_config_tab()
         self.withdraw()
         self.window_hidden = True
         self._set_status("Aplicación minimizada a la bandeja")
